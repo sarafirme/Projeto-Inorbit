@@ -21,6 +21,7 @@ export async function getWeekPendingGoals() {
       .from(goals)
       .where(lte(goals.createdAt, lastDayOfWeek))
   )
+  
   const goalCompletionCounts = db.$with('goal_completion_counts').as(
     db
       .select({
