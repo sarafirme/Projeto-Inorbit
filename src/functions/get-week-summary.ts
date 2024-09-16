@@ -1,11 +1,10 @@
-import { and, count, desc, eq, gte, lte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, lte, sql } from 'drizzle-orm'
 import { db } from '../db'
 import { goalCompletions, goals } from '../db/schema'
 import dayjs from 'dayjs'
-import { number } from 'zod'
 
 export async function getWeekSummary() {
-  const firstDayOFWeek = dayjs().startOf('week').toDate() //primeiro dia da semana
+  const firstDayOfWeek = dayjs().startOf('week').toDate()
   const lastDayOfWeek = dayjs().endOf('week').toDate()
 
   const goalsCreatedUpToWeek = db.$with('goals_created_up_to_week').as(
@@ -18,7 +17,7 @@ export async function getWeekSummary() {
       })
       .from(goals)
       .where(lte(goals.createdAt, lastDayOfWeek))
-  ) //metas criadas
+  )
 
   const goalsCompletedInWeek = db.$with('goals_completed_in_week').as(
     db
@@ -26,65 +25,68 @@ export async function getWeekSummary() {
         id: goalCompletions.id,
         title: goals.title,
         completedAt: goalCompletions.createdAt,
-        completedAtDate: sql` 
-         DATE(${goalCompletions.createdAt})
-
-         `.as('completedAtDate'),
+        completedAtDate: sql /*sql*/`
+          DATE(${goalCompletions.createdAt})
+        `.as('completedAtDate'),
       })
       .from(goalCompletions)
       .innerJoin(goals, eq(goals.id, goalCompletions.goalId))
       .where(
         and(
-          gte(goalCompletions.createdAt, firstDayOFWeek),
+          gte(goalCompletions.createdAt, firstDayOfWeek),
           lte(goalCompletions.createdAt, lastDayOfWeek)
         )
       )
-      .orderBy(goalCompletions.createdAt)
-  ) //metas completas
+      .orderBy(desc(goalCompletions.createdAt))
+  )
 
-  const goalsCompleteByWeekDay = db.$with('goals_complete_by_week_day').as(
+  const goalsCompletedByWeekDay = db.$with('goals_completed_by_week_day').as(
     db
       .select({
         completedAtDate: goalsCompletedInWeek.completedAtDate,
-        completions: sql`
-         JSON_AGG(
+        completions: sql /*sql*/`
+          JSON_AGG(
             JSON_BUILD_OBJECT(
-               'id', ${goalsCompletedInWeek.id},
-               'title', ${goalsCompletedInWeek.title},
-               'completeAt', ${goalsCompletedInWeek.completedAt}
+              'id', ${goalsCompletedInWeek.id},
+              'title', ${goalsCompletedInWeek.title},
+              'completedAt', ${goalsCompletedInWeek.completedAt}
             )
-         )
-         `.as('completions'),
+          )
+        `.as('completions'),
       })
       .from(goalsCompletedInWeek)
       .groupBy(goalsCompletedInWeek.completedAtDate)
       .orderBy(desc(goalsCompletedInWeek.completedAtDate))
   )
 
-
-  type GoalsPerDay = Record<string, {
-    id: string
-    title:string
-    completeAt: string
-  }[]>
+  type GoalsPerDay = Record<
+    string,
+    {
+      id: string
+      title: string
+      completedAt: string
+    }[]
+  >
 
   const result = await db
-    .with(goalsCreatedUpToWeek, goalsCompletedInWeek, goalsCompleteByWeekDay)
+    .with(goalsCreatedUpToWeek, goalsCompletedInWeek, goalsCompletedByWeekDay)
     .select({
-      completed: sql` 
-          (SELECT COUNT(*) FROM ${goalsCompletedInWeek})`.mapWith(Number),
-
-      total:
-        sql`(SELECT SUM(${goalsCreatedUpToWeek.desiredWeeklyFrequency}) FROM ${goalsCreatedUpToWeek})`.mapWith(
+      completed:
+        sql /*sql*/`(SELECT COUNT(*) FROM ${goalsCompletedInWeek})`.mapWith(
           Number
         ),
-      goalsPerDay: sql<GoalsPerDay>`
+      total:
+        sql /*sql*/`(SELECT SUM(${goalsCreatedUpToWeek.desiredWeeklyFrequency}) FROM ${goalsCreatedUpToWeek})`.mapWith(
+          Number
+        ),
+      goalsPerDay: sql /*sql*/<GoalsPerDay>`
         JSON_OBJECT_AGG(
-          ${goalsCompleteByWeekDay.completedAtDate}, ${goalsCompleteByWeekDay.completions}
+          ${goalsCompletedByWeekDay.completedAtDate},
+          ${goalsCompletedByWeekDay.completions}
         )
-        `,
+      `,
     })
-    .from(goalsCompleteByWeekDay)
+    .from(goalsCompletedByWeekDay)
 
   return {
     summary: result[0],
